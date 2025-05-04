@@ -1,0 +1,76 @@
+import asyncio
+from bleak import BleakClient, BleakScanner
+import RPi.GPIO as GPIO
+
+# Setup for passive buzzer on GPIO18
+GPIO.setwarnings(False)
+BUZZER_PIN = 18
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(BUZZER_PIN, GPIO.OUT)
+buzzer = GPIO.PWM(BUZZER_PIN, 1)
+buzzer.start(0)  # Start with silence
+
+# BLE constants
+LUX_CHAR_UUID = "00002a56-0000-1000-8000-00805f9b34fb"
+TARGET_NAME = "LightSensor"
+
+# Map lux to buzzer frequency (Hz)
+def map_lux_to_freq(lux):
+    if lux < 100:
+        return 0  # Silent in low light
+    elif lux > 900:.//
+        return 2000  # Very bright = high tone
+    else:
+        return int((lux - 100) * (2000 - 200) / 700 + 200)
+
+# Handle BLE notifications
+def notification_handler(sender, data):
+    lux = int.from_bytes(data, byteorder='little')
+    freq = map_lux_to_freq(lux)
+
+    if freq == 0:
+        buzzer.ChangeDutyCycle(0)  # Silent
+    else:
+        buzzer.ChangeFrequency(freq)
+        buzzer.ChangeDutyCycle(50)  # 50% tone volume
+
+    print(f"Lux: {lux}, Buzzer Frequency: {freq} Hz")
+
+# Scan and find device by name
+async def find_device():
+    print("Scanning for LightSensor...")
+    devices = await BleakScanner.discover()
+    for device in devices:
+        if device.name == TARGET_NAME:
+            print(f"Found {TARGET_NAME} at {device.address}")
+            return device.address
+    return None
+
+# Connect and monitor
+async def connect_and_monitor(address):
+    try:
+        async with BleakClient(address, timeout=20.0) as client:
+            print(f"Connected to {TARGET_NAME}")
+            await client.start_notify(LUX_CHAR_UUID, notification_handler)
+            while await client.is_connected():
+                await asyncio.sleep(1)
+    except Exception as e:
+        print(f"Connection failed or dropped: {e}")
+
+# Retry connection
+async def main():
+    while True:
+        address = await find_device()
+        if address:
+            await connect_and_monitor(address)
+        else:
+            print("Device not found. Retrying in 5 seconds...")
+            await asyncio.sleep(5)
+
+try:
+    asyncio.run(main())
+except KeyboardInterrupt:
+    print("Stopped by user")
+finally:
+    buzzer.stop()
+    GPIO.cleanup()
